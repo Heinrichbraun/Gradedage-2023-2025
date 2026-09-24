@@ -27,7 +27,8 @@ def forbered(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data
-def hent_standarddata() -> pd.DataFrame:
+def hent_standarddata(filversion: float) -> pd.DataFrame:
+    # filversion (filens ændringstidspunkt) gør, at cachen ugyldiggøres, når CSV'en ændres
     return forbered(pd.read_csv(DATA_FIL, sep=";", encoding="utf-8-sig"))
 
 
@@ -40,7 +41,7 @@ upload = st.sidebar.file_uploader(
 if upload:
     df = forbered(pd.read_csv(upload, sep=";", encoding="utf-8-sig"))
 else:
-    df = hent_standarddata()
+    df = hent_standarddata(DATA_FIL.stat().st_mtime)
 
 etiketter = df["Måned"].tolist()
 start, slut = st.sidebar.select_slider(
