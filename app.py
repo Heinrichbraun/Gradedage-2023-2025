@@ -9,6 +9,13 @@ MÅNEDER_KORT = ["jan", "feb", "mar", "apr", "maj", "jun",
                 "jul", "aug", "sep", "okt", "nov", "dec"]
 # Tydeligt adskilte farver (orange, blå, grøn, magenta, gul, lilla, brun) – virker i både light og dark mode
 ÅR_FARVER = ["#FF9F1C", "#3A86FF", "#06D6A0", "#F72585", "#FFD60A", "#8338EC", "#A98467"]
+KILDE_TIDLIGERE = "https://aalborgforsyning.dk/hverdag-med-forsyning/graddagetal-vejrpaavirkning/tidligere-aars-graddagetal/"
+KILDE_2026 = "https://aalborgforsyning.dk/hverdag-med-forsyning/graddagetal-vejrpaavirkning/#graddage%202025"
+KILDE_TEKST = (
+    "**Kilde:** Aalborg Forsyning  \n"
+    f"2023–2025: [Tidligere års graddagetal]({KILDE_TIDLIGERE})  \n"
+    f"2026: [Graddagetal og vejrpåvirkning]({KILDE_2026})"
+)
 PÅKRÆVET = {"År", "Måned nr", "Antal graddage", "Normal"}
 
 st.set_page_config(page_title="Graddage – Aalborg Forsyning", layout="wide")
@@ -53,14 +60,7 @@ def hent_standarddata(filversion: float) -> pd.DataFrame:
 
 # ---------- Sidebar ----------
 st.sidebar.header("Indstillinger")
-upload = st.sidebar.file_uploader(
-    "Brug egen CSV (valgfrit)", type="csv",
-    help="Samme format som graddage_aalborg.csv (semikolon-separeret). Praktisk hvis du tilføjer 2026.",
-)
-if upload:
-    df = forbered(pd.read_csv(upload, sep=";", encoding="utf-8-sig"))
-else:
-    df = hent_standarddata(DATA_FIL.stat().st_mtime)
+df = hent_standarddata(DATA_FIL.stat().st_mtime)
 
 etiketter = df["Måned"].tolist()
 start, slut = st.sidebar.select_slider(
@@ -69,6 +69,16 @@ start, slut = st.sidebar.select_slider(
 )
 i0, i1 = etiketter.index(start), etiketter.index(slut)
 udsnit = df.iloc[i0 : i1 + 1]
+
+st.sidebar.divider()
+st.sidebar.download_button(
+    "⬇️ Download hele datasættet (CSV)",
+    DATA_FIL.read_bytes(),
+    file_name="graddage_aalborg.csv",
+    mime="text/csv",
+    help="Alle måneder og år, semikolon-separeret (åbner direkte i dansk Excel).",
+)
+st.sidebar.markdown(KILDE_TEKST)
 
 # ---------- Hoved ----------
 st.title("Graddage – Aalborg Forsyning")
@@ -297,3 +307,6 @@ with tab_tabel:
         file_name="graddage_udsnit.csv",
         mime="text/csv",
     )
+
+st.divider()
+st.caption(KILDE_TEKST)
