@@ -1,4 +1,4 @@
-﻿År;Måned nr;Måned;Antal graddage;Normal
+År;Måned nr;Måned;Antal graddage;Normal
 2023;1;Januar;495;528
 2023;2;Februar;437;468
 2023;3;Marts;521;468
@@ -35,3 +35,11 @@
 2025;10;Oktober;298;257
 2025;11;November;410;369
 2025;12;December;443;464
+2026;1;Januar;642;528
+2026;2;Februar;574;468
+2026;3;Marts;431;468
+2026;4;April;367;336
+2026;5;Maj;250;208
+2026;6;Juni;131;102
+2026;7;Juli;102;88
+2026;8;August;111;87
