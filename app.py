@@ -11,7 +11,7 @@ MÅNEDER_KORT = ["jan", "feb", "mar", "apr", "maj", "jun",
 ÅR_FARVER = ["#FF9F1C", "#3A86FF", "#06D6A0", "#F72585", "#FFD60A", "#8338EC", "#A98467"]
 PÅKRÆVET = {"År", "Måned nr", "Antal graddage", "Normal"}
 
-st.set_page_config(page_title="Graddage – Aalborg Forsyning", page_icon="🌡️", layout="wide")
+st.set_page_config(page_title="Graddage – Aalborg Forsyning", layout="wide")
 
 
 def forbered(df: pd.DataFrame) -> pd.DataFrame:
@@ -23,9 +23,18 @@ def forbered(df: pd.DataFrame) -> pd.DataFrame:
     df["Dato"] = pd.to_datetime(dict(year=df["År"], month=df["Måned nr"], day=1))
     df = df.sort_values("Dato").reset_index(drop=True)
     df["Måned"] = df["Dato"].dt.month.map(lambda m: MÅNEDER_KORT[m - 1]) + " " + df["År"].astype(str)
-    df["Afvigelse"] = df["Antal graddage"] - df["Normal"]
+    df["Afvigelse"] = df["Normal"] - df["Antal graddage"]  # plus = færre graddage end normalen
     df["Afvigelse %"] = (df["Afvigelse"] / df["Normal"] * 100).round(1)
     return df
+
+
+def tegn(x, decimaler: int = 0) -> str:
+    """Formaterer med fortegn: +5, -5 eller 0."""
+    if pd.isna(x):
+        return ""
+    if round(x, decimaler) == 0:
+        return "0"
+    return f"{x:+.{decimaler}f}"
 
 
 def normal_farve() -> str:
@@ -62,15 +71,15 @@ i0, i1 = etiketter.index(start), etiketter.index(slut)
 udsnit = df.iloc[i0 : i1 + 1]
 
 # ---------- Hoved ----------
-st.title("🌡️ Graddage – Aalborg Forsyning")
+st.title("Graddage – Aalborg Forsyning")
 st.caption(f"Valgt periode: **{start}** til **{slut}** ({len(udsnit)} måneder)")
 
 samlet, normal = udsnit["Antal graddage"].sum(), udsnit["Normal"].sum()
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Graddage i alt", f"{samlet:,}".replace(",", "."))
 k2.metric("Normal i alt", f"{normal:,}".replace(",", "."))
-k3.metric("Afvigelse", f"{samlet - normal:+,}".replace(",", "."))
-k4.metric("Afvigelse i %", f"{(samlet - normal) / normal * 100:+.1f} %")
+k3.metric("Afvigelse", f"{normal - samlet:+,}".replace(",", "."), help="Normal minus faktisk. Plus = færre graddage end normalen, minus = flere.")
+k4.metric("Afvigelse i %", f"{(normal - samlet) / normal * 100:+.1f} %", help="Plus = færre graddage end normalen, minus = flere.")
 
 tab_graf, tab_år, tab_sam, tab_afv, tab_tabel = st.tabs(
     ["Graddage vs. normal", "År side om side", "Sammenlign og udtræk", "Afvigelse", "Tabel"]
@@ -81,7 +90,7 @@ with tab_graf:
     basis = alt.Chart(udsnit).encode(x=alt.X("Måned:N", sort=rækkefølge, title=None))
     søjler = basis.mark_bar(opacity=0.85).encode(
         y=alt.Y("Antal graddage:Q", title="Graddage"),
-        tooltip=["Måned", "Antal graddage", "Normal", "Afvigelse"],
+        tooltip=["Måned", "Antal graddage", "Normal", alt.Tooltip("Afvigelse:Q", format="+d")],
     )
     linje = basis.mark_line(color="red", point=True).encode(y="Normal:Q")
     st.altair_chart((søjler + linje).properties(height=380), use_container_width=True)
@@ -198,7 +207,7 @@ with tab_sam:
         def forskel(kol: str) -> pd.Series:
             begge = bred[kol].notna() & ref.notna()
             a, r = bred[kol].where(begge), ref.where(begge)
-            d = a - r
+            d = r - a  # plus = færre graddage end referencen
             if akk:
                 d, r = d.cumsum(), r.cumsum()
             return d / r * 100 if pct else d
@@ -212,10 +221,12 @@ with tab_sam:
             f_lang = til_lang(f_bred, "Forskel")
             nul = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(strokeDash=[4, 4], color=FARVE_NORMAL).encode(y="y:Q")
             f_linjer = alt.Chart(f_lang).mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=3).encode(
-                x=xs, y=alt.Y("Forskel:Q", title=f"Forskel ({enhed}{', akkumuleret' if akk else ''})"),
-                color=farve, tooltip=["År", "Md", alt.Tooltip("Forskel:Q", format=".1f")])
+                x=xs, y=alt.Y("Forskel:Q", axis=alt.Axis(format="+.0f"),
+                              title=f"Forskel ({enhed}{', akkumuleret' if akk else ''})"),
+                color=farve, tooltip=["År", "Md", alt.Tooltip("Forskel:Q", format="+.1f")])
             st.altair_chart((nul + f_linjer).properties(height=320), use_container_width=True)
-            st.caption(f"Over nul = flere graddage (koldere) end {baseline}. Under nul = færre (varmere). "
+            st.caption(f"Forskel = {baseline} minus valgt år. Plus (+) = færre graddage end {baseline} (varmere). "
+                       "Minus (-) = flere graddage (koldere). "
                        "Kun måneder hvor begge har data indgår.")
 
             # --- Sammenfatning ---
@@ -225,7 +236,7 @@ with tab_sam:
                 if not begge.any():
                     continue
                 a, r = bred.loc[begge, k], ref[begge]
-                d = a - r
+                d = r - a
                 m_max = d.abs().idxmax()
                 rækker.append({
                     "År": k, "Graddage": int(a.sum()), f"Reference ({baseline})": int(r.sum()),
@@ -235,7 +246,11 @@ with tab_sam:
                 })
             st.subheader("Sammenfatning")
             oversigt = pd.DataFrame(rækker)
-            st.dataframe(oversigt, use_container_width=True, hide_index=True)
+            oversigt_vis = oversigt.copy()
+            if not oversigt.empty:
+                oversigt_vis["Forskel"] = oversigt["Forskel"].map(tegn)
+                oversigt_vis["Forskel %"] = oversigt["Forskel %"].map(lambda v: tegn(v, 1))
+            st.dataframe(oversigt_vis, use_container_width=True, hide_index=True)
 
             st.subheader("Månedlige tal")
             maaned_tabel = bred[kolonner + ["Normal"]].copy()
@@ -248,7 +263,10 @@ with tab_sam:
             t1.caption("Graddage pr. måned")
             t1.dataframe(maaned_tabel, use_container_width=True)
             t2.caption(f"Forskel mod {baseline} ({enhed}{', akkumuleret' if akk else ''})")
-            t2.dataframe(forskel_tabel, use_container_width=True)
+            t2.dataframe(
+                forskel_tabel.apply(lambda kol: kol.map(lambda v: tegn(v, 1 if pct else 0))),
+                use_container_width=True,
+            )
 
             d1, d2, d3 = st.columns(3)
             csv = lambda x, idx: x.to_csv(index=idx, sep=";", decimal=",").encode("utf-8-sig")
@@ -259,16 +277,20 @@ with tab_sam:
 with tab_afv:
     afv = alt.Chart(udsnit).mark_bar().encode(
         x=alt.X("Måned:N", sort=rækkefølge, title=None),
-        y=alt.Y("Afvigelse:Q", title="Faktisk − normal"),
-        color=alt.condition(alt.datum.Afvigelse > 0, alt.value("#d62728"), alt.value("#1f77b4")),
-        tooltip=["Måned", "Afvigelse", "Afvigelse %"],
+        y=alt.Y("Afvigelse:Q", title="Afvigelse (normal − faktisk)", axis=alt.Axis(format="+.0f")),
+        color=alt.condition(alt.datum.Afvigelse > 0, alt.value("#1f77b4"), alt.value("#d62728")),
+        tooltip=["Måned", alt.Tooltip("Afvigelse:Q", format="+d"), alt.Tooltip("Afvigelse %:Q", format="+.1f")],
     )
     st.altair_chart(afv.properties(height=380), use_container_width=True)
-    st.caption("Rød = koldere end normalt (flere graddage). Blå = varmere end normalt.")
+    st.caption("Afvigelse = normal minus faktisk. Blå / plus (+) = færre graddage end normalen (varmere). Rød / minus (-) = flere graddage (koldere).")
 
 with tab_tabel:
     vis = udsnit[["Måned", "Antal graddage", "Normal", "Afvigelse", "Afvigelse %"]]
-    st.dataframe(vis, use_container_width=True, hide_index=True)
+    vis_vist = vis.copy()
+    vis_vist["Afvigelse"] = vis["Afvigelse"].map(tegn)
+    vis_vist["Afvigelse %"] = vis["Afvigelse %"].map(lambda v: tegn(v, 1))
+    st.dataframe(vis_vist, use_container_width=True, hide_index=True)
+    st.caption("Afvigelse = normal minus faktisk. Plus (+) = færre graddage end normalen, minus (-) = flere.")
     st.download_button(
         "⬇️ Download udsnit som CSV",
         vis.to_csv(index=False, sep=";").encode("utf-8-sig"),
