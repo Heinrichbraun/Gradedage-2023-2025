@@ -7,6 +7,8 @@ import streamlit as st
 DATA_FIL = Path(__file__).parent / "graddage_aalborg.csv"
 MÅNEDER_KORT = ["jan", "feb", "mar", "apr", "maj", "jun",
                 "jul", "aug", "sep", "okt", "nov", "dec"]
+# Tydeligt adskilte farver (orange, blå, grøn, magenta, gul, lilla, brun) – virker i både light og dark mode
+ÅR_FARVER = ["#FF9F1C", "#3A86FF", "#06D6A0", "#F72585", "#FFD60A", "#8338EC", "#A98467"]
 PÅKRÆVET = {"År", "Måned nr", "Antal graddage", "Normal"}
 
 st.set_page_config(page_title="Graddage – Aalborg Forsyning", page_icon="🌡️", layout="wide")
@@ -29,7 +31,7 @@ def forbered(df: pd.DataFrame) -> pd.DataFrame:
 def normal_farve() -> str:
     """Lys linje i dark mode, mørk i light mode. Neutral grå hvis temaet ikke kan aflæses."""
     try:
-        return "#f0f0f0" if st.context.theme.type == "dark" else "#222222"
+        return "#ffffff" if st.context.theme.type == "dark" else "#222222"
     except Exception:
         return "#9e9e9e"
 
@@ -103,26 +105,37 @@ with tab_år:
         normal_df["Kumulativ normal"] = normal_df["Normal"].cumsum()
 
         x = alt.X("Md:N", sort=MÅNEDER_KORT, title=None)
-        farve = alt.Color("År:N", title="År")
+        normal_df["År"] = "Normal"
+
+        # Fast farve pr. år (og for normalen), uanset hvilke år der er valgt.
+        # Normalen er med i farveskalaen, så den får en prik i signaturen til højre.
+        farve = alt.Color(
+            "År:N", title=None,
+            scale=alt.Scale(
+                domain=[str(å) for å in alle_år] + ["Normal"],
+                range=ÅR_FARVER[: len(alle_år)] + [NORMAL_FARVE],
+            ),
+            legend=alt.Legend(orient="right", symbolType="circle", symbolSize=140),
+        )
 
         st.subheader("Graddage pr. måned")
-        linjer = alt.Chart(år_df).mark_line(point=True).encode(
+        linjer = alt.Chart(år_df).mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=3).encode(
             x=x, y=alt.Y("Antal graddage:Q", title="Graddage"), color=farve,
             tooltip=["År", "Md", "Antal graddage", "Normal"],
         )
-        norm = alt.Chart(normal_df).mark_line(color=NORMAL_FARVE, strokeDash=[6, 4]).encode(
-            x=x, y="Normal:Q", tooltip=["Md", "Normal"],
+        norm = alt.Chart(normal_df).mark_line(strokeDash=[6, 4], strokeWidth=2).encode(
+            color=farve, x=x, y="Normal:Q", tooltip=["Md", "Normal"],
         )
         st.altair_chart((linjer + norm).properties(height=350), use_container_width=True)
-        st.caption("Stiplet linje: normal.")
+        st.caption("Stiplet linje: normal (prik i signaturen til højre).")
 
         st.subheader("Akkumuleret gennem året")
-        kum = alt.Chart(år_df).mark_line(point=True).encode(
+        kum = alt.Chart(år_df).mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=3).encode(
             x=x, y=alt.Y("Kumulativ:Q", title="Graddage (akkumuleret)"), color=farve,
             tooltip=["År", "Md", "Kumulativ"],
         )
-        kum_norm = alt.Chart(normal_df).mark_line(color=NORMAL_FARVE, strokeDash=[6, 4]).encode(
-            x=x, y="Kumulativ normal:Q", tooltip=["Md", "Kumulativ normal"],
+        kum_norm = alt.Chart(normal_df).mark_line(strokeDash=[6, 4], strokeWidth=2).encode(
+            color=farve, x=x, y="Kumulativ normal:Q", tooltip=["Md", "Kumulativ normal"],
         )
         st.altair_chart((kum + kum_norm).properties(height=350), use_container_width=True)
         st.caption("Viser, hvordan hvert år hober sig op i forhold til normalen. "
