@@ -72,8 +72,8 @@ k2.metric("Normal i alt", f"{normal:,}".replace(",", "."))
 k3.metric("Afvigelse", f"{samlet - normal:+,}".replace(",", "."))
 k4.metric("Afvigelse i %", f"{(samlet - normal) / normal * 100:+.1f} %")
 
-tab_graf, tab_år, tab_afv, tab_tabel = st.tabs(
-    ["Graddage vs. normal", "År side om side", "Afvigelse", "Tabel"]
+tab_graf, tab_år, tab_sam, tab_afv, tab_tabel = st.tabs(
+    ["Graddage vs. normal", "År side om side", "Sammenlign og udtræk", "Afvigelse", "Tabel"]
 )
 rækkefølge = udsnit["Måned"].tolist()
 
@@ -140,6 +140,121 @@ with tab_år:
         st.altair_chart((kum + kum_norm).properties(height=350), use_container_width=True)
         st.caption("Viser, hvordan hvert år hober sig op i forhold til normalen. "
                    "Et år med manglende måneder (fx 2026) stopper ved sidste kendte måned.")
+
+with tab_sam:
+    st.caption("Justerbar sammenligning: vælg år, måneder og referencepunkt, og hent tallene ud som CSV.")
+    ALLE_ÅR = sorted(df["År"].unique().tolist())
+    FARVE_NORMAL = normal_farve()
+
+    c1, c2 = st.columns([2, 1])
+    valgte = c1.multiselect("År der vises", ALLE_ÅR, default=ALLE_ÅR, key="sam_år")
+    baseline = c2.selectbox("Sammenlign mod", ["Normal"] + [str(å) for å in ALLE_ÅR], key="sam_ref")
+    m0, m1 = st.select_slider("Måneder (fra – til)", options=MÅNEDER_KORT, value=("jan", "dec"), key="sam_md")
+    c3, c4 = st.columns(2)
+    akk = c3.radio("Visning", ["Måned for måned", "Akkumuleret"], horizontal=True, key="sam_akk") == "Akkumuleret"
+    pct = c4.radio("Forskel angives i", ["Graddage", "Procent"], horizontal=True, key="sam_pct") == "Procent"
+
+    mnd = list(range(MÅNEDER_KORT.index(m0) + 1, MÅNEDER_KORT.index(m1) + 2))
+    kolonner = [str(å) for å in valgte]
+    sammenlign = [k for k in kolonner if k != baseline]
+
+    bred = df.pivot(index="Måned nr", columns="År", values="Antal graddage").reindex(mnd)
+    bred.columns = [str(k) for k in bred.columns]
+    bred["Normal"] = df.drop_duplicates("Måned nr").set_index("Måned nr")["Normal"].reindex(mnd)
+    ref = bred[baseline]
+    md_navn = lambda m: MÅNEDER_KORT[m - 1]
+
+    if not kolonner:
+        st.info("Vælg mindst ét år.")
+    else:
+        skala = alt.Scale(
+            domain=[str(å) for å in ALLE_ÅR] + ["Normal"],
+            range=ÅR_FARVER[: len(ALLE_ÅR)] + [FARVE_NORMAL],
+        )
+        farve = alt.Color("År:N", title=None, scale=skala,
+                          legend=alt.Legend(orient="right", symbolType="circle", symbolSize=140))
+        xs = alt.X("Md:N", sort=MÅNEDER_KORT, title=None)
+
+        def til_lang(wide: pd.DataFrame, navn: str) -> pd.DataFrame:
+            l = wide.copy()
+            l["Md"] = [md_navn(m) for m in l.index]
+            return l.melt(id_vars="Md", var_name="År", value_name=navn).dropna(subset=[navn])
+
+        # --- Graf 1: graddage ---
+        abs_bred = bred[kolonner + ["Normal"]]
+        if akk:
+            abs_bred = abs_bred.cumsum()
+        abs_lang = til_lang(abs_bred, "Værdi")
+        ytitel = "Graddage (akkumuleret)" if akk else "Graddage"
+        st.subheader("Graddage")
+        g_år = alt.Chart(abs_lang[abs_lang["År"] != "Normal"]).mark_line(
+            point=alt.OverlayMarkDef(size=70), strokeWidth=3).encode(
+            x=xs, y=alt.Y("Værdi:Q", title=ytitel), color=farve, tooltip=["År", "Md", "Værdi"])
+        g_norm = alt.Chart(abs_lang[abs_lang["År"] == "Normal"]).mark_line(
+            strokeDash=[6, 4], strokeWidth=2).encode(x=xs, y="Værdi:Q", color=farve, tooltip=["Md", "Værdi"])
+        st.altair_chart((g_år + g_norm).properties(height=320), use_container_width=True)
+
+        # --- Forskel mod reference (kun måneder hvor begge har data) ---
+        def forskel(kol: str) -> pd.Series:
+            begge = bred[kol].notna() & ref.notna()
+            a, r = bred[kol].where(begge), ref.where(begge)
+            d = a - r
+            if akk:
+                d, r = d.cumsum(), r.cumsum()
+            return d / r * 100 if pct else d
+
+        st.subheader(f"Forskel mod {baseline}")
+        if not sammenlign:
+            st.info("Vælg mindst ét andet år end referencen for at se forskellen.")
+        else:
+            f_bred = pd.DataFrame({k: forskel(k) for k in sammenlign})
+            enhed = "%" if pct else "graddage"
+            f_lang = til_lang(f_bred, "Forskel")
+            nul = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(strokeDash=[4, 4], color=FARVE_NORMAL).encode(y="y:Q")
+            f_linjer = alt.Chart(f_lang).mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=3).encode(
+                x=xs, y=alt.Y("Forskel:Q", title=f"Forskel ({enhed}{', akkumuleret' if akk else ''})"),
+                color=farve, tooltip=["År", "Md", alt.Tooltip("Forskel:Q", format=".1f")])
+            st.altair_chart((nul + f_linjer).properties(height=320), use_container_width=True)
+            st.caption(f"Over nul = flere graddage (koldere) end {baseline}. Under nul = færre (varmere). "
+                       "Kun måneder hvor begge har data indgår.")
+
+            # --- Sammenfatning ---
+            rækker = []
+            for k in sammenlign:
+                begge = bred[k].notna() & ref.notna()
+                if not begge.any():
+                    continue
+                a, r = bred.loc[begge, k], ref[begge]
+                d = a - r
+                m_max = d.abs().idxmax()
+                rækker.append({
+                    "År": k, "Graddage": int(a.sum()), f"Reference ({baseline})": int(r.sum()),
+                    "Forskel": int(d.sum()), "Forskel %": round(d.sum() / r.sum() * 100, 1),
+                    "Måneder sammenlignet": int(begge.sum()),
+                    "Største månedsafvigelse": f"{md_navn(m_max)} ({d[m_max]:+.0f})",
+                })
+            st.subheader("Sammenfatning")
+            oversigt = pd.DataFrame(rækker)
+            st.dataframe(oversigt, use_container_width=True, hide_index=True)
+
+            st.subheader("Månedlige tal")
+            maaned_tabel = bred[kolonner + ["Normal"]].copy()
+            maaned_tabel.index = [md_navn(m) for m in maaned_tabel.index]
+            maaned_tabel.index.name = "Måned"
+            forskel_tabel = f_bred.copy()
+            forskel_tabel.index = maaned_tabel.index
+            forskel_tabel = forskel_tabel.round(1)
+            t1, t2 = st.columns(2)
+            t1.caption("Graddage pr. måned")
+            t1.dataframe(maaned_tabel, use_container_width=True)
+            t2.caption(f"Forskel mod {baseline} ({enhed}{', akkumuleret' if akk else ''})")
+            t2.dataframe(forskel_tabel, use_container_width=True)
+
+            d1, d2, d3 = st.columns(3)
+            csv = lambda x, idx: x.to_csv(index=idx, sep=";", decimal=",").encode("utf-8-sig")
+            d1.download_button("⬇️ Sammenfatning", csv(oversigt, False), "sammenfatning.csv", "text/csv")
+            d2.download_button("⬇️ Månedlige graddage", csv(maaned_tabel, True), "maanedlige_graddage.csv", "text/csv")
+            d3.download_button("⬇️ Forskelle", csv(forskel_tabel, True), "forskelle.csv", "text/csv")
 
 with tab_afv:
     afv = alt.Chart(udsnit).mark_bar().encode(
