@@ -91,8 +91,8 @@ k2.metric("Normal i alt", f"{normal:,}".replace(",", "."))
 k3.metric("Afvigelse", f"{normal - samlet:+,}".replace(",", "."), help="Normal minus faktisk. Plus = færre graddage end normalen, minus = flere.")
 k4.metric("Afvigelse i %", f"{(normal - samlet) / normal * 100:+.1f} %", help="Plus = færre graddage end normalen, minus = flere.")
 
-tab_graf, tab_år, tab_sam, tab_afv, tab_tabel = st.tabs(
-    ["Graddage vs. normal", "År side om side", "Sammenlign og udtræk", "Afvigelse", "Tabel"]
+tab_graf, tab_år, tab_sam, tab_afv, tab_tabel, tab_priser = st.tabs(
+    ["Graddage vs. normal", "År side om side", "Sammenlign og udtræk", "Afvigelse", "Tabel", "Prisudvikling"]
 )
 rækkefølge = udsnit["Måned"].tolist()
 
@@ -307,6 +307,40 @@ with tab_tabel:
         file_name="graddage_udsnit.csv",
         mime="text/csv",
     )
+
+with tab_priser:
+    st.subheader("Prisudvikling – Aalborg Forsyning")
+    st.caption("Prisudvikling i fjernvarme over tid (inkl. moms). Kilder: [Aalborg Forsyning Priser](https://aalborgforsyning.dk/priser/) & [Artikelliste](https://aalborgforsyning.dk/artikelliste/)")
+
+    pris_data = [
+        {"Periode": "Indtil 1. dec 2022", "Pris pr. kWh (kr.)": 0.456, "Pris pr. MWh (kr.)": 456},
+        {"Periode": "1. dec 2022 – 31. aug 2023", "Pris pr. kWh (kr.)": 0.547, "Pris pr. MWh (kr.)": 547},
+        {"Periode": "1. sep 2023 – 31. mar 2024", "Pris pr. kWh (kr.)": 0.684, "Pris pr. MWh (kr.)": 684},
+        {"Periode": "1. apr 2024 – 31. dec 2025", "Pris pr. kWh (kr.)": 0.821, "Pris pr. MWh (kr.)": 821},
+        {"Periode": "1. jan 2026 – nuværende", "Pris pr. kWh (kr.)": 0.993, "Pris pr. MWh (kr.)": 993},
+    ]
+    df_priser = pd.DataFrame(pris_data)
+
+    # Beregn stigning i forhold til startprisen
+    startpris = df_priser["Pris pr. kWh (kr.)"].iloc[0]
+    df_priser["Samlet stigning (%)"] = ((df_priser["Pris pr. kWh (kr.)"] - startpris) / startpris * 100).round(1)
+
+    # Vis oversigtstabel
+    st.dataframe(df_priser, use_container_width=True, hide_index=True)
+
+    # Graf over prisudvikling
+    st.subheader("Grafisk visning af kWh-prisudvikling")
+    pris_graf = (
+        alt.Chart(df_priser)
+        .mark_line(point=alt.OverlayMarkDef(size=80, color="#FF9F1C"), strokeWidth=3, color="#FF9F1C")
+        .encode(
+            x=alt.X("Periode:N", sort=df_priser["Periode"].tolist(), title="Periode med gældende pris"),
+            y=alt.Y("Pris pr. kWh (kr.):Q", title="Pris pr. kWh (kr. inkl. moms)", scale=alt.Scale(domain=[0.3, 1.1])),
+            tooltip=["Periode", "Pris pr. kWh (kr.)", "Pris pr. MWh (kr.)", alt.Tooltip("Samlet stigning (%):Q", format="+.1f")],
+        )
+        .properties(height=350)
+    )
+    st.altair_chart(pris_graf, use_container_width=True)
 
 st.divider()
 st.caption(KILDE_TEKST)
