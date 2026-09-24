@@ -321,26 +321,19 @@ with tab_priser:
     ]
     df_priser = pd.DataFrame(pris_data)
 
-    # Beregn stigning i forhold til startprisen
-    startpris = df_priser["Pris pr. kWh (kr.)"].iloc[0]
-    df_priser["Samlet stigning (%)"] = ((df_priser["Pris pr. kWh (kr.)"] - startpris) / startpris * 100).round(1)
+    # Beregn ændringer i forhold til forrige periode
+    df_priser["Stigning (kr.)"] = df_priser["Pris pr. kWh (kr.)"].diff().round(3)
+    df_priser["Stigning (%)"] = (df_priser["Pris pr. kWh (kr.)"].pct_change() * 100).round(1)
+
+    # Formater visning med fortegn (+ / -)
+    df_priser_vis = df_priser.copy()
+    df_priser_vis["Stigning (kr.)"] = df_priser_vis["Stigning (kr.)"].map(lambda x: f"{x:+.3f} kr." if pd.notna(x) else "-")
+    df_priser_vis["Stigning (%)"] = df_priser_vis["Stigning (%)"].map(lambda x: f"{x:+.1f} %" if pd.notna(x) else "-")
+    df_priser_vis["Pris pr. kWh (kr.)"] = df_priser_vis["Pris pr. kWh (kr.)"].map(lambda x: f"{x:.3f} kr.")
+    df_priser_vis["Pris pr. MWh (kr.)"] = df_priser_vis["Pris pr. MWh (kr.)"].map(lambda x: f"{x:.0f} kr.")
 
     # Vis oversigtstabel
-    st.dataframe(df_priser, use_container_width=True, hide_index=True)
-
-    # Graf over prisudvikling
-    st.subheader("Grafisk visning af kWh-prisudvikling")
-    pris_graf = (
-        alt.Chart(df_priser)
-        .mark_line(point=alt.OverlayMarkDef(size=80, color="#FF9F1C"), strokeWidth=3, color="#FF9F1C")
-        .encode(
-            x=alt.X("Periode:N", sort=df_priser["Periode"].tolist(), title="Periode med gældende pris"),
-            y=alt.Y("Pris pr. kWh (kr.):Q", title="Pris pr. kWh (kr. inkl. moms)", scale=alt.Scale(domain=[0.3, 1.1])),
-            tooltip=["Periode", "Pris pr. kWh (kr.)", "Pris pr. MWh (kr.)", alt.Tooltip("Samlet stigning (%):Q", format="+.1f")],
-        )
-        .properties(height=350)
-    )
-    st.altair_chart(pris_graf, use_container_width=True)
+    st.dataframe(df_priser_vis, use_container_width=True, hide_index=True)
 
 st.divider()
 st.caption(KILDE_TEKST)
