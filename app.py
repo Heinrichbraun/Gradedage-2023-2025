@@ -62,7 +62,9 @@ k2.metric("Normal i alt", f"{normal:,}".replace(",", "."))
 k3.metric("Afvigelse", f"{samlet - normal:+,}".replace(",", "."))
 k4.metric("Afvigelse i %", f"{(samlet - normal) / normal * 100:+.1f} %")
 
-tab_graf, tab_afv, tab_tabel = st.tabs(["Graddage vs. normal", "Afvigelse", "Tabel"])
+tab_graf, tab_år, tab_afv, tab_tabel = st.tabs(
+    ["Graddage vs. normal", "År side om side", "Afvigelse", "Tabel"]
+)
 rækkefølge = udsnit["Måned"].tolist()
 
 with tab_graf:
@@ -74,6 +76,48 @@ with tab_graf:
     linje = basis.mark_line(color="red", point=True).encode(y="Normal:Q")
     st.altair_chart((søjler + linje).properties(height=380), use_container_width=True)
     st.caption("Søjler: faktiske graddage. Rød linje: normal.")
+
+with tab_år:
+    st.caption("Sammenligner kalenderår måned for måned. Bruger alle data, uafhængigt af periodevælgeren.")
+    alle_år = sorted(df["År"].unique().tolist())
+    valgte_år = st.multiselect("Vælg år", alle_år, default=alle_år)
+    if not valgte_år:
+        st.info("Vælg mindst ét år.")
+    else:
+        år_df = df[df["År"].isin(valgte_år)].copy()
+        år_df["Kumulativ"] = år_df.groupby("År")["Antal graddage"].cumsum()
+        år_df["Md"] = år_df["Måned nr"].map(lambda m: MÅNEDER_KORT[m - 1])
+        år_df["År"] = år_df["År"].astype(str)
+
+        normal_df = df.drop_duplicates("Måned nr").sort_values("Måned nr")[["Måned nr", "Normal"]].copy()
+        normal_df["Md"] = normal_df["Måned nr"].map(lambda m: MÅNEDER_KORT[m - 1])
+        normal_df["Kumulativ normal"] = normal_df["Normal"].cumsum()
+
+        x = alt.X("Md:N", sort=MÅNEDER_KORT, title=None)
+        farve = alt.Color("År:N", title="År")
+
+        st.subheader("Graddage pr. måned")
+        linjer = alt.Chart(år_df).mark_line(point=True).encode(
+            x=x, y=alt.Y("Antal graddage:Q", title="Graddage"), color=farve,
+            tooltip=["År", "Md", "Antal graddage", "Normal"],
+        )
+        norm = alt.Chart(normal_df).mark_line(color="black", strokeDash=[6, 4]).encode(
+            x=x, y="Normal:Q", tooltip=["Md", "Normal"],
+        )
+        st.altair_chart((linjer + norm).properties(height=350), use_container_width=True)
+        st.caption("Stiplet sort linje: normal.")
+
+        st.subheader("Akkumuleret gennem året")
+        kum = alt.Chart(år_df).mark_line(point=True).encode(
+            x=x, y=alt.Y("Kumulativ:Q", title="Graddage (akkumuleret)"), color=farve,
+            tooltip=["År", "Md", "Kumulativ"],
+        )
+        kum_norm = alt.Chart(normal_df).mark_line(color="black", strokeDash=[6, 4]).encode(
+            x=x, y="Kumulativ normal:Q", tooltip=["Md", "Kumulativ normal"],
+        )
+        st.altair_chart((kum + kum_norm).properties(height=350), use_container_width=True)
+        st.caption("Viser, hvordan hvert år hober sig op i forhold til normalen. "
+                   "Et år med manglende måneder (fx 2026) stopper ved sidste kendte måned.")
 
 with tab_afv:
     afv = alt.Chart(udsnit).mark_bar().encode(
