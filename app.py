@@ -26,6 +26,14 @@ def forbered(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def normal_farve() -> str:
+    """Lys linje i dark mode, mørk i light mode. Neutral grå hvis temaet ikke kan aflæses."""
+    try:
+        return "#f0f0f0" if st.context.theme.type == "dark" else "#222222"
+    except Exception:
+        return "#9e9e9e"
+
+
 @st.cache_data
 def hent_standarddata(filversion: float) -> pd.DataFrame:
     # filversion (filens ændringstidspunkt) gør, at cachen ugyldiggøres, når CSV'en ændres
@@ -78,6 +86,7 @@ with tab_graf:
     st.caption("Søjler: faktiske graddage. Rød linje: normal.")
 
 with tab_år:
+    NORMAL_FARVE = normal_farve()
     st.caption("Sammenligner kalenderår måned for måned. Bruger alle data, uafhængigt af periodevælgeren.")
     alle_år = sorted(df["År"].unique().tolist())
     valgte_år = st.multiselect("Vælg år", alle_år, default=alle_år)
@@ -101,18 +110,18 @@ with tab_år:
             x=x, y=alt.Y("Antal graddage:Q", title="Graddage"), color=farve,
             tooltip=["År", "Md", "Antal graddage", "Normal"],
         )
-        norm = alt.Chart(normal_df).mark_line(color="black", strokeDash=[6, 4]).encode(
+        norm = alt.Chart(normal_df).mark_line(color=NORMAL_FARVE, strokeDash=[6, 4]).encode(
             x=x, y="Normal:Q", tooltip=["Md", "Normal"],
         )
         st.altair_chart((linjer + norm).properties(height=350), use_container_width=True)
-        st.caption("Stiplet sort linje: normal.")
+        st.caption("Stiplet linje: normal.")
 
         st.subheader("Akkumuleret gennem året")
         kum = alt.Chart(år_df).mark_line(point=True).encode(
             x=x, y=alt.Y("Kumulativ:Q", title="Graddage (akkumuleret)"), color=farve,
             tooltip=["År", "Md", "Kumulativ"],
         )
-        kum_norm = alt.Chart(normal_df).mark_line(color="black", strokeDash=[6, 4]).encode(
+        kum_norm = alt.Chart(normal_df).mark_line(color=NORMAL_FARVE, strokeDash=[6, 4]).encode(
             x=x, y="Kumulativ normal:Q", tooltip=["Md", "Kumulativ normal"],
         )
         st.altair_chart((kum + kum_norm).properties(height=350), use_container_width=True)
