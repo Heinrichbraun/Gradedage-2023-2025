@@ -7,6 +7,8 @@ import streamlit as st
 DATA_FIL = Path(__file__).parent / "graddage_aalborg.csv"
 MÅNEDER_KORT = ["jan", "feb", "mar", "apr", "maj", "jun",
                 "jul", "aug", "sep", "okt", "nov", "dec"]
+# Varmeåret løber fra juni til maj, ikke januar til december
+MÅNEDER_VARME = MÅNEDER_KORT[5:] + MÅNEDER_KORT[:5]
 # Tydeligt adskilte farver (orange, blå, grøn, magenta, gul, lilla, brun) – virker i både light og dark mode
 ÅR_FARVER = ["#FF9F1C", "#3A86FF", "#06D6A0", "#F72585", "#FFD60A", "#8338EC", "#A98467"]
 KILDE_TIDLIGERE = "https://aalborgforsyning.dk/hverdag-med-forsyning/graddagetal-vejrpaavirkning/tidligere-aars-graddagetal/"
@@ -16,6 +18,21 @@ KILDE_TEKST = (
     f"2023–2025: [Tidligere års graddagetal]({KILDE_TIDLIGERE})  \n"
     f"2026: [Graddagetal og vejrpåvirkning]({KILDE_2026})"
 )
+KILDE_PRISER_1 = "https://aalborgforsyning.dk/priser/"
+KILDE_PRISER_2 = "https://aalborgforsyning.dk/artikelliste/"
+KILDE_PRISER_TEKST = (
+    "**Kilde:** Aalborg Forsyning  \n"
+    f"[Priser]({KILDE_PRISER_1}) · [Artikelliste / pressemeddelelser]({KILDE_PRISER_2})"
+)
+
+# Varmepris pr. kWh (inkl. moms). Hver ny periode gælder, til den næste starter.
+PRISER = [
+    {"Periode": "Indtil 1. dec 2022", "Pris pr. kWh": 0.456},
+    {"Periode": "1. dec 2022 – 31. aug 2023", "Pris pr. kWh": 0.547},
+    {"Periode": "1. sep 2023 – 31. mar 2024", "Pris pr. kWh": 0.684},
+    {"Periode": "1. apr 2024 – 31. dec 2025", "Pris pr. kWh": 0.821},
+    {"Periode": "1. jan 2026 – nuværende", "Pris pr. kWh": 0.993},
+]
 PÅKRÆVET = {"År", "Måned nr", "Antal graddage", "Normal"}
 
 st.set_page_config(page_title="Graddage – Aalborg Forsyning", layout="wide")
@@ -32,6 +49,11 @@ def forbered(df: pd.DataFrame) -> pd.DataFrame:
     df["Måned"] = df["Dato"].dt.month.map(lambda m: MÅNEDER_KORT[m - 1]) + " " + df["År"].astype(str)
     df["Afvigelse"] = df["Normal"] - df["Antal graddage"]  # plus = færre graddage end normalen
     df["Afvigelse %"] = (df["Afvigelse"] / df["Normal"] * 100).round(1)
+    # Varmeår: løber fra juni til maj (fx juni 2025 – maj 2026 = "2025/2026"), som Aalborg Forsynings opgørelser
+    df["Varmeår"] = df.apply(
+        lambda r: f"{r['År']}/{r['År'] + 1}" if r["Måned nr"] >= 6 else f"{r['År'] - 1}/{r['År']}", axis=1
+    )
+    df["VarmePos"] = ((df["Måned nr"] - 6) % 12) + 1  # 1 = juni ... 12 = maj
     return df
 
 
@@ -91,8 +113,8 @@ k2.metric("Normal i alt", f"{normal:,}".replace(",", "."))
 k3.metric("Afvigelse", f"{normal - samlet:+,}".replace(",", "."), help="Normal minus faktisk. Plus = færre graddage end normalen, minus = flere.")
 k4.metric("Afvigelse i %", f"{(normal - samlet) / normal * 100:+.1f} %", help="Plus = færre graddage end normalen, minus = flere.")
 
-tab_graf, tab_år, tab_sam, tab_afv, tab_tabel, tab_priser = st.tabs(
-    ["Graddage vs. normal", "År side om side", "Sammenlign og udtræk", "Afvigelse", "Tabel", "Prisudvikling"]
+tab_graf, tab_år, tab_sam, tab_afv, tab_tabel, tab_pris = st.tabs(
+    ["Graddage vs. normal", "Varmeår side om side", "Sammenlign og udtræk", "Afvigelse", "Tabel", "Priser"]
 )
 rækkefølge = udsnit["Måned"].tolist()
 
@@ -108,31 +130,34 @@ with tab_graf:
 
 with tab_år:
     NORMAL_FARVE = normal_farve()
-    st.caption("Sammenligner kalenderår måned for måned. Bruger alle data, uafhængigt af periodevælgeren.")
-    alle_år = sorted(df["År"].unique().tolist())
-    valgte_år = st.multiselect("Vælg år", alle_år, default=alle_år)
-    if not valgte_år:
-        st.info("Vælg mindst ét år.")
+    st.caption("Sammenligner varmeår (juni–maj) måned for måned. Bruger alle data, uafhængigt af periodevælgeren.")
+    alle_perioder = sorted(df["Varmeår"].unique().tolist())
+    valgte_perioder = st.multiselect("Vælg varmeår", alle_perioder, default=alle_perioder)
+    if not valgte_perioder:
+        st.info("Vælg mindst ét varmeår.")
     else:
-        år_df = df[df["År"].isin(valgte_år)].copy()
-        år_df["Kumulativ"] = år_df.groupby("År")["Antal graddage"].cumsum()
+        år_df = df[df["Varmeår"].isin(valgte_perioder)].copy()
+        år_df = år_df.sort_values(["Varmeår", "VarmePos"])
+        år_df["Kumulativ"] = år_df.groupby("Varmeår")["Antal graddage"].cumsum()
         år_df["Md"] = år_df["Måned nr"].map(lambda m: MÅNEDER_KORT[m - 1])
-        år_df["År"] = år_df["År"].astype(str)
+        år_df = år_df.rename(columns={"Varmeår": "År"})
 
-        normal_df = df.drop_duplicates("Måned nr").sort_values("Måned nr")[["Måned nr", "Normal"]].copy()
+        normal_df = (
+            df.drop_duplicates("Måned nr").sort_values("VarmePos")[["Måned nr", "VarmePos", "Normal"]].copy()
+        )
         normal_df["Md"] = normal_df["Måned nr"].map(lambda m: MÅNEDER_KORT[m - 1])
         normal_df["Kumulativ normal"] = normal_df["Normal"].cumsum()
-
-        x = alt.X("Md:N", sort=MÅNEDER_KORT, title=None)
         normal_df["År"] = "Normal"
 
-        # Fast farve pr. år (og for normalen), uanset hvilke år der er valgt.
+        x = alt.X("Md:N", sort=MÅNEDER_VARME, title=None)
+
+        # Fast farve pr. varmeår (og for normalen), uanset hvilke perioder der er valgt.
         # Normalen er med i farveskalaen, så den får en prik i signaturen til højre.
         farve = alt.Color(
             "År:N", title=None,
             scale=alt.Scale(
-                domain=[str(å) for å in alle_år] + ["Normal"],
-                range=ÅR_FARVER[: len(alle_år)] + [NORMAL_FARVE],
+                domain=alle_perioder + ["Normal"],
+                range=ÅR_FARVER[: len(alle_perioder)] + [NORMAL_FARVE],
             ),
             legend=alt.Legend(orient="right", symbolType="circle", symbolSize=140),
         )
@@ -146,9 +171,9 @@ with tab_år:
             color=farve, x=x, y="Normal:Q", tooltip=["Md", "Normal"],
         )
         st.altair_chart((linjer + norm).properties(height=350), use_container_width=True)
-        st.caption("Stiplet linje: normal (prik i signaturen til højre).")
+        st.caption("Stiplet linje: normal (prik i signaturen til højre). Varmeåret løber fra juni til maj.")
 
-        st.subheader("Akkumuleret gennem året")
+        st.subheader("Akkumuleret gennem varmeåret")
         kum = alt.Chart(år_df).mark_line(point=alt.OverlayMarkDef(size=70), strokeWidth=3).encode(
             x=x, y=alt.Y("Kumulativ:Q", title="Graddage (akkumuleret)"), color=farve,
             tooltip=["År", "Md", "Kumulativ"],
@@ -157,42 +182,42 @@ with tab_år:
             color=farve, x=x, y="Kumulativ normal:Q", tooltip=["Md", "Kumulativ normal"],
         )
         st.altair_chart((kum + kum_norm).properties(height=350), use_container_width=True)
-        st.caption("Viser, hvordan hvert år hober sig op i forhold til normalen. "
-                   "Et år med manglende måneder (fx 2026) stopper ved sidste kendte måned.")
+        st.caption("Viser, hvordan hvert varmeår hober sig op i forhold til normalen. "
+                   "Et varmeår med manglende måneder (fx 2025/2026) stopper ved sidste kendte måned.")
 
 with tab_sam:
-    st.caption("Justerbar sammenligning: vælg år, måneder og referencepunkt, og hent tallene ud som CSV.")
-    ALLE_ÅR = sorted(df["År"].unique().tolist())
+    st.caption("Justerbar sammenligning på tværs af varmeår (juni–maj): vælg varmeår, måneder og referencepunkt, og hent tallene ud som CSV.")
+    ALLE_PERIODER = sorted(df["Varmeår"].unique().tolist())
     FARVE_NORMAL = normal_farve()
 
     c1, c2 = st.columns([2, 1])
-    valgte = c1.multiselect("År der vises", ALLE_ÅR, default=ALLE_ÅR, key="sam_år")
-    baseline = c2.selectbox("Sammenlign mod", ["Normal"] + [str(å) for å in ALLE_ÅR], key="sam_ref")
-    m0, m1 = st.select_slider("Måneder (fra – til)", options=MÅNEDER_KORT, value=("jan", "dec"), key="sam_md")
+    valgte = c1.multiselect("Varmeår der vises", ALLE_PERIODER, default=ALLE_PERIODER, key="sam_år")
+    baseline = c2.selectbox("Sammenlign mod", ["Normal"] + ALLE_PERIODER, key="sam_ref")
+    m0, m1 = st.select_slider("Måneder (fra – til, varmeår)", options=MÅNEDER_VARME,
+                              value=(MÅNEDER_VARME[0], MÅNEDER_VARME[-1]), key="sam_md")
     c3, c4 = st.columns(2)
     akk = c3.radio("Visning", ["Måned for måned", "Akkumuleret"], horizontal=True, key="sam_akk") == "Akkumuleret"
     pct = c4.radio("Forskel angives i", ["Graddage", "Procent"], horizontal=True, key="sam_pct") == "Procent"
 
-    mnd = list(range(MÅNEDER_KORT.index(m0) + 1, MÅNEDER_KORT.index(m1) + 2))
-    kolonner = [str(å) for å in valgte]
+    mnd = list(range(MÅNEDER_VARME.index(m0) + 1, MÅNEDER_VARME.index(m1) + 2))  # VarmePos-værdier
+    kolonner = list(valgte)
     sammenlign = [k for k in kolonner if k != baseline]
 
-    bred = df.pivot(index="Måned nr", columns="År", values="Antal graddage").reindex(mnd)
-    bred.columns = [str(k) for k in bred.columns]
-    bred["Normal"] = df.drop_duplicates("Måned nr").set_index("Måned nr")["Normal"].reindex(mnd)
+    bred = df.pivot(index="VarmePos", columns="Varmeår", values="Antal graddage").reindex(mnd)
+    bred["Normal"] = df.drop_duplicates("Måned nr").set_index("VarmePos")["Normal"].reindex(mnd)
     ref = bred[baseline]
-    md_navn = lambda m: MÅNEDER_KORT[m - 1]
+    md_navn = lambda pos: MÅNEDER_VARME[pos - 1]
 
     if not kolonner:
-        st.info("Vælg mindst ét år.")
+        st.info("Vælg mindst ét varmeår.")
     else:
         skala = alt.Scale(
-            domain=[str(å) for å in ALLE_ÅR] + ["Normal"],
-            range=ÅR_FARVER[: len(ALLE_ÅR)] + [FARVE_NORMAL],
+            domain=ALLE_PERIODER + ["Normal"],
+            range=ÅR_FARVER[: len(ALLE_PERIODER)] + [FARVE_NORMAL],
         )
         farve = alt.Color("År:N", title=None, scale=skala,
                           legend=alt.Legend(orient="right", symbolType="circle", symbolSize=140))
-        xs = alt.X("Md:N", sort=MÅNEDER_KORT, title=None)
+        xs = alt.X("Md:N", sort=MÅNEDER_VARME, title=None)
 
         def til_lang(wide: pd.DataFrame, navn: str) -> pd.DataFrame:
             l = wide.copy()
@@ -224,7 +249,7 @@ with tab_sam:
 
         st.subheader(f"Forskel mod {baseline}")
         if not sammenlign:
-            st.info("Vælg mindst ét andet år end referencen for at se forskellen.")
+            st.info("Vælg mindst ét andet varmeår end referencen for at se forskellen.")
         else:
             f_bred = pd.DataFrame({k: forskel(k) for k in sammenlign})
             enhed = "%" if pct else "graddage"
@@ -235,7 +260,7 @@ with tab_sam:
                               title=f"Forskel ({enhed}{', akkumuleret' if akk else ''})"),
                 color=farve, tooltip=["År", "Md", alt.Tooltip("Forskel:Q", format="+.1f")])
             st.altair_chart((nul + f_linjer).properties(height=320), use_container_width=True)
-            st.caption(f"Forskel = {baseline} minus valgt år. Plus (+) = færre graddage end {baseline} (varmere). "
+            st.caption(f"Forskel = {baseline} minus valgt varmeår. Plus (+) = færre graddage end {baseline} (varmere). "
                        "Minus (-) = flere graddage (koldere). "
                        "Kun måneder hvor begge har data indgår.")
 
@@ -249,7 +274,7 @@ with tab_sam:
                 d = r - a
                 m_max = d.abs().idxmax()
                 rækker.append({
-                    "År": k, "Graddage": int(a.sum()), f"Reference ({baseline})": int(r.sum()),
+                    "Varmeår": k, "Graddage": int(a.sum()), f"Reference ({baseline})": int(r.sum()),
                     "Forskel": int(d.sum()), "Forskel %": round(d.sum() / r.sum() * 100, 1),
                     "Måneder sammenlignet": int(begge.sum()),
                     "Største månedsafvigelse": f"{md_navn(m_max)} ({d[m_max]:+.0f})",
@@ -308,32 +333,44 @@ with tab_tabel:
         mime="text/csv",
     )
 
-with tab_priser:
-    st.subheader("Prisudvikling – Aalborg Forsyning")
-    st.caption("Prisudvikling i fjernvarme over tid (inkl. moms). Kilder: [Aalborg Forsyning Priser](https://aalborgforsyning.dk/priser/) & [Artikelliste](https://aalborgforsyning.dk/artikelliste/)")
+with tab_pris:
+    st.caption("Udviklingen i Aalborg Forsynings variable varmepris (fjernvarme), inkl. moms.")
+    pris_df = pd.DataFrame(PRISER)
+    pris_df["Pris pr. MWh"] = (pris_df["Pris pr. kWh"] * 1000).round(0).astype(int)
+    pris_df["Ændring pr. kWh"] = pris_df["Pris pr. kWh"].diff()
+    pris_df["Ændring %"] = (pris_df["Pris pr. kWh"].pct_change() * 100).round(1)
 
-    pris_data = [
-        {"Periode": "Indtil 1. dec 2022", "Pris pr. kWh (kr.)": 0.456, "Pris pr. MWh (kr.)": 456},
-        {"Periode": "1. dec 2022 – 31. aug 2023", "Pris pr. kWh (kr.)": 0.547, "Pris pr. MWh (kr.)": 547},
-        {"Periode": "1. sep 2023 – 31. mar 2024", "Pris pr. kWh (kr.)": 0.684, "Pris pr. MWh (kr.)": 684},
-        {"Periode": "1. apr 2024 – 31. dec 2025", "Pris pr. kWh (kr.)": 0.821, "Pris pr. MWh (kr.)": 821},
-        {"Periode": "1. jan 2026 – nuværende", "Pris pr. kWh (kr.)": 0.993, "Pris pr. MWh (kr.)": 993},
-    ]
-    df_priser = pd.DataFrame(pris_data)
+    st.subheader("Prisudvikling pr. kWh")
+    pris_chart = alt.Chart(pris_df).mark_line(
+        point=alt.OverlayMarkDef(size=80), strokeWidth=3, interpolate="step-after"
+    ).encode(
+        x=alt.X("Periode:N", sort=None, title=None),
+        y=alt.Y("Pris pr. kWh:Q", title="Kr. pr. kWh (inkl. moms)", scale=alt.Scale(zero=False)),
+        tooltip=["Periode", alt.Tooltip("Pris pr. kWh:Q", format=".3f"),
+                 alt.Tooltip("Ændring %:Q", format="+.1f")],
+    )
+    st.altair_chart(pris_chart.properties(height=350), use_container_width=True)
 
-    # Beregn ændringer i forhold til forrige periode
-    df_priser["Stigning (kr.)"] = df_priser["Pris pr. kWh (kr.)"].diff().round(3)
-    df_priser["Stigning (%)"] = (df_priser["Pris pr. kWh (kr.)"].pct_change() * 100).round(1)
+    st.subheader("Tabel")
+    vis_pris = pris_df.copy()
+    vis_pris["Pris pr. kWh"] = vis_pris["Pris pr. kWh"].map(lambda v: f"{v:.3f} kr.")
+    vis_pris["Pris pr. MWh"] = vis_pris["Pris pr. MWh"].map(lambda v: f"{v:,} kr.".replace(",", "."))
+    vis_pris["Ændring pr. kWh"] = pris_df["Ændring pr. kWh"].map(lambda v: "" if pd.isna(v) else f"{v:+.3f} kr.")
+    vis_pris["Ændring %"] = pris_df["Ændring %"].map(lambda v: "" if pd.isna(v) else tegn(v, 1) + " %")
+    st.dataframe(vis_pris, use_container_width=True, hide_index=True)
 
-    # Formater visning med fortegn (+ / -)
-    df_priser_vis = df_priser.copy()
-    df_priser_vis["Stigning (kr.)"] = df_priser_vis["Stigning (kr.)"].map(lambda x: f"{x:+.3f} kr." if pd.notna(x) else "-")
-    df_priser_vis["Stigning (%)"] = df_priser_vis["Stigning (%)"].map(lambda x: f"{x:+.1f} %" if pd.notna(x) else "-")
-    df_priser_vis["Pris pr. kWh (kr.)"] = df_priser_vis["Pris pr. kWh (kr.)"].map(lambda x: f"{x:.3f} kr.")
-    df_priser_vis["Pris pr. MWh (kr.)"] = df_priser_vis["Pris pr. MWh (kr.)"].map(lambda x: f"{x:.0f} kr.")
-
-    # Vis oversigtstabel
-    st.dataframe(df_priser_vis, use_container_width=True, hide_index=True)
+    samlet_stigning = (pris_df["Pris pr. kWh"].iloc[-1] / pris_df["Pris pr. kWh"].iloc[0] - 1) * 100
+    st.caption(
+        f"Fra den første til den nuværende periode er prisen pr. kWh steget {samlet_stigning:.0f} %, "
+        f"fra {pris_df['Pris pr. kWh'].iloc[0]:.3f} kr. til {pris_df['Pris pr. kWh'].iloc[-1]:.3f} kr."
+    )
+    st.download_button(
+        "⬇️ Download priser som CSV",
+        pris_df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+        file_name="varmepriser_aalborg.csv",
+        mime="text/csv",
+    )
+    st.caption(KILDE_PRISER_TEKST)
 
 st.divider()
 st.caption(KILDE_TEKST)
