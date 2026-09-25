@@ -140,7 +140,7 @@ with tab_år:
         år_df = år_df.sort_values(["Varmeår", "VarmePos"])
         år_df["Kumulativ"] = år_df.groupby("Varmeår")["Antal graddage"].cumsum()
         år_df["Md"] = år_df["Måned nr"].map(lambda m: MÅNEDER_KORT[m - 1])
-        år_df = år_df.rename(columns={"Varmeår": "År"})
+        år_df["År"] = år_df["Varmeår"]  # overskriver kalenderår-kolonnen med varmeårs-labels til farve/tooltip
 
         normal_df = (
             df.drop_duplicates("Måned nr").sort_values("VarmePos")[["Måned nr", "VarmePos", "Normal"]].copy()
