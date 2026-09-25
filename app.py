@@ -47,7 +47,7 @@ def forbered(df: pd.DataFrame) -> pd.DataFrame:
     df["Dato"] = pd.to_datetime(dict(year=df["År"], month=df["Måned nr"], day=1))
     df = df.sort_values("Dato").reset_index(drop=True)
     df["Måned"] = df["Dato"].dt.month.map(lambda m: MÅNEDER_KORT[m - 1]) + " " + df["År"].astype(str)
-    df["Afvigelse"] = df["Normal"] - df["Antal graddage"]  # plus = færre graddage end normalen
+    df["Afvigelse"] = df["Antal graddage"] - df["Normal"]  # plus = flere graddage end normalen (koldere)
     df["Afvigelse %"] = (df["Afvigelse"] / df["Normal"] * 100).round(1)
     # Varmeår: løber fra juni til maj (fx juni 2025 – maj 2026 = "2025/2026"), som Aalborg Forsynings opgørelser
     df["Varmeår"] = df.apply(
@@ -82,6 +82,12 @@ def hent_standarddata(filversion: float) -> pd.DataFrame:
 
 # ---------- Sidebar ----------
 st.sidebar.header("Indstillinger")
+st.sidebar.info(
+    "**+ / − forklaret**  \n"
+    "**+ (plus):** flere graddage end sammenligningen → koldere, mere opvarmning.  \n"
+    "**− (minus):** færre graddage end sammenligningen → varmere, mindre opvarmning.",
+    icon="📖",
+)
 df = hent_standarddata(DATA_FIL.stat().st_mtime)
 etiketter = df["Måned"].tolist()
 alle_varmeår_global = sorted(df["Varmeår"].unique().tolist())
@@ -128,8 +134,8 @@ samlet, normal = udsnit["Antal graddage"].sum(), udsnit["Normal"].sum()
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Graddage i alt", f"{samlet:,}".replace(",", "."))
 k2.metric("Normal i alt", f"{normal:,}".replace(",", "."))
-k3.metric("Afvigelse", f"{normal - samlet:+,}".replace(",", "."), help="Normal minus faktisk. Plus = færre graddage end normalen, minus = flere.")
-k4.metric("Afvigelse i %", f"{(normal - samlet) / normal * 100:+.1f} %", help="Plus = færre graddage end normalen, minus = flere.")
+k3.metric("Afvigelse", f"{samlet - normal:+,}".replace(",", "."), help="Faktisk minus normal. Plus (+) = flere graddage end normalen (koldere). Minus (−) = færre (varmere).")
+k4.metric("Afvigelse i %", f"{(samlet - normal) / normal * 100:+.1f} %", help="Plus (+) = flere graddage end normalen (koldere). Minus (−) = færre (varmere).")
 
 tab_graf, tab_år, tab_sam, tab_afv, tab_tabel, tab_pris = st.tabs(
     ["Graddage vs. normal", "Varmeår side om side", "Sammenlign og udtræk", "Afvigelse", "Tabel", "Priser"]
@@ -260,7 +266,7 @@ with tab_sam:
         def forskel(kol: str) -> pd.Series:
             begge = bred[kol].notna() & ref.notna()
             a, r = bred[kol].where(begge), ref.where(begge)
-            d = r - a  # plus = færre graddage end referencen
+            d = a - r  # plus = flere graddage end referencen (koldere)
             if akk:
                 d, r = d.cumsum(), r.cumsum()
             return d / r * 100 if pct else d
@@ -278,8 +284,8 @@ with tab_sam:
                               title=f"Forskel ({enhed}{', akkumuleret' if akk else ''})"),
                 color=farve, tooltip=["År", "Md", alt.Tooltip("Forskel:Q", format="+.1f")])
             st.altair_chart((nul + f_linjer).properties(height=320), use_container_width=True)
-            st.caption(f"Forskel = {baseline} minus valgt varmeår. Plus (+) = færre graddage end {baseline} (varmere). "
-                       "Minus (-) = flere graddage (koldere). "
+            st.caption(f"Forskel = valgt varmeår minus {baseline}. Plus (+) = flere graddage end {baseline} (koldere). "
+                       "Minus (−) = færre graddage (varmere). "
                        "Kun måneder hvor begge har data indgår.")
 
             # --- Sammenfatning ---
@@ -289,7 +295,7 @@ with tab_sam:
                 if not begge.any():
                     continue
                 a, r = bred.loc[begge, k], ref[begge]
-                d = r - a
+                d = a - r
                 m_max = d.abs().idxmax()
                 rækker.append({
                     "Varmeår": k, "Graddage": int(a.sum()), f"Reference ({baseline})": int(r.sum()),
@@ -330,12 +336,12 @@ with tab_sam:
 with tab_afv:
     afv = alt.Chart(udsnit).mark_bar().encode(
         x=alt.X("Måned:N", sort=rækkefølge, title=None),
-        y=alt.Y("Afvigelse:Q", title="Afvigelse (normal − faktisk)", axis=alt.Axis(format="+.0f")),
-        color=alt.condition(alt.datum.Afvigelse > 0, alt.value("#1f77b4"), alt.value("#d62728")),
+        y=alt.Y("Afvigelse:Q", title="Afvigelse (faktisk − normal)", axis=alt.Axis(format="+.0f")),
+        color=alt.condition(alt.datum.Afvigelse > 0, alt.value("#d62728"), alt.value("#1f77b4")),
         tooltip=["Måned", alt.Tooltip("Afvigelse:Q", format="+d"), alt.Tooltip("Afvigelse %:Q", format="+.1f")],
     )
     st.altair_chart(afv.properties(height=380), use_container_width=True)
-    st.caption("Afvigelse = normal minus faktisk. Blå / plus (+) = færre graddage end normalen (varmere). Rød / minus (-) = flere graddage (koldere).")
+    st.caption("Afvigelse = faktisk minus normal. Rød / plus (+) = flere graddage end normalen (koldere). Blå / minus (−) = færre (varmere).")
 
 with tab_tabel:
     vis = udsnit[["Måned", "Antal graddage", "Normal", "Afvigelse", "Afvigelse %"]]
@@ -343,7 +349,7 @@ with tab_tabel:
     vis_vist["Afvigelse"] = vis["Afvigelse"].map(tegn)
     vis_vist["Afvigelse %"] = vis["Afvigelse %"].map(lambda v: tegn(v, 1))
     st.dataframe(vis_vist, use_container_width=True, hide_index=True)
-    st.caption("Afvigelse = normal minus faktisk. Plus (+) = færre graddage end normalen, minus (-) = flere.")
+    st.caption("Afvigelse = faktisk minus normal. Plus (+) = flere graddage end normalen (koldere), minus (−) = færre (varmere).")
     st.download_button(
         "⬇️ Download udsnit som CSV",
         vis.to_csv(index=False, sep=";").encode("utf-8-sig"),
