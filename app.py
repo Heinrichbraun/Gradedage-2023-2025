@@ -83,10 +83,28 @@ def hent_standarddata(filversion: float) -> pd.DataFrame:
 # ---------- Sidebar ----------
 st.sidebar.header("Indstillinger")
 df = hent_standarddata(DATA_FIL.stat().st_mtime)
-
 etiketter = df["Måned"].tolist()
+alle_varmeår_global = sorted(df["Varmeår"].unique().tolist())
+
+
+def _sæt_periode_fra_varmeår() -> None:
+    valgt = st.session_state["hurtig_varmeår"]
+    if valgt == "Brugerdefineret":
+        return
+    mnd_i_år = df[df["Varmeår"] == valgt].sort_values("VarmePos")
+    st.session_state["periode_slider"] = (mnd_i_år["Måned"].iloc[0], mnd_i_år["Måned"].iloc[-1])
+
+
+st.sidebar.selectbox(
+    "Hurtigt valg: varmeår (juni–maj)",
+    ["Brugerdefineret"] + alle_varmeår_global,
+    key="hurtig_varmeår",
+    on_change=_sæt_periode_fra_varmeår,
+    help="Sætter periodevælgeren nedenfor til det valgte varmeår. Du kan stadig finjustere med sliderens håndtag bagefter.",
+)
 start, slut = st.sidebar.select_slider(
     "Periode", options=etiketter, value=(etiketter[0], etiketter[-1]),
+    key="periode_slider",
     help="Træk i håndtagene for at vælge fra- og til-måned (begge inklusive).",
 )
 i0, i1 = etiketter.index(start), etiketter.index(slut)
@@ -339,17 +357,6 @@ with tab_pris:
     pris_df["Pris pr. MWh"] = (pris_df["Pris pr. kWh"] * 1000).round(0).astype(int)
     pris_df["Ændring pr. kWh"] = pris_df["Pris pr. kWh"].diff()
     pris_df["Ændring %"] = (pris_df["Pris pr. kWh"].pct_change() * 100).round(1)
-
-    st.subheader("Prisudvikling pr. kWh")
-    pris_chart = alt.Chart(pris_df).mark_line(
-        point=alt.OverlayMarkDef(size=80), strokeWidth=3, interpolate="step-after"
-    ).encode(
-        x=alt.X("Periode:N", sort=None, title=None),
-        y=alt.Y("Pris pr. kWh:Q", title="Kr. pr. kWh (inkl. moms)", scale=alt.Scale(zero=False)),
-        tooltip=["Periode", alt.Tooltip("Pris pr. kWh:Q", format=".3f"),
-                 alt.Tooltip("Ændring %:Q", format="+.1f")],
-    )
-    st.altair_chart(pris_chart.properties(height=350), use_container_width=True)
 
     st.subheader("Tabel")
     vis_pris = pris_df.copy()
