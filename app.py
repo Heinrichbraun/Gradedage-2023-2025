@@ -93,24 +93,23 @@ etiketter = df["Måned"].tolist()
 alle_varmeår_global = sorted(df["Varmeår"].unique().tolist())
 
 
-def _sæt_periode_fra_varmeår() -> None:
-    valgt = st.session_state["hurtig_varmeår"]
-    if valgt == "Brugerdefineret":
-        return
-    mnd_i_år = df[df["Varmeår"] == valgt].sort_values("VarmePos")
-    st.session_state["periode_slider"] = (mnd_i_år["Måned"].iloc[0], mnd_i_år["Måned"].iloc[-1])
-
-
-st.sidebar.selectbox(
+valgt_hurtig = st.sidebar.selectbox(
     "Hurtigt valg: varmeår (juni–maj)",
     ["Brugerdefineret"] + alle_varmeår_global,
     key="hurtig_varmeår",
-    on_change=_sæt_periode_fra_varmeår,
     help="Sætter periodevælgeren nedenfor til det valgte varmeår. Du kan stadig finjustere med sliderens håndtag bagefter.",
 )
+if valgt_hurtig == "Brugerdefineret":
+    slider_start, slider_slut = etiketter[0], etiketter[-1]
+    slider_key = "periode_fri"
+else:
+    mnd_i_år = df[df["Varmeår"] == valgt_hurtig].sort_values("VarmePos")
+    slider_start, slider_slut = mnd_i_år["Måned"].iloc[0], mnd_i_år["Måned"].iloc[-1]
+    # Ny nøgle pr. varmeår => slideren nulstilles til det valgte varmeår (ingen session_state-skrivning nødvendig)
+    slider_key = "periode_" + valgt_hurtig.replace("/", "_")
 start, slut = st.sidebar.select_slider(
-    "Periode", options=etiketter, value=(etiketter[0], etiketter[-1]),
-    key="periode_slider",
+    "Periode", options=etiketter, value=(slider_start, slider_slut),
+    key=slider_key,
     help="Træk i håndtagene for at vælge fra- og til-måned (begge inklusive).",
 )
 i0, i1 = etiketter.index(start), etiketter.index(slut)
